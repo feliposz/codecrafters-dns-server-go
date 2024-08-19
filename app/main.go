@@ -43,11 +43,21 @@ func main() {
 		//response := []byte{}
 		responseHeader := receivedHeader
 		responseHeader.QueryResponseIndicator = true
+		responseHeader.AnswerRecordCount = 1
 
 		receivedQuestion := decodeQuestion([]byte(receivedData[12:]))
 
+		answer := DNSAnswer{
+			Name:  receivedQuestion.Name,
+			Type:  receivedQuestion.Type,
+			Class: receivedQuestion.Class,
+			TTL:   60,
+			Data:  []byte{8, 8, 8, 8},
+		}
+
 		response := encodeDNSHeader(responseHeader)
 		response = append(response, encodeQuestion(receivedQuestion)...)
+		response = append(response, encodeAnswer(answer)...)
 
 		_, err = udpConn.WriteToUDP(response, source)
 		if err != nil {
@@ -171,5 +181,28 @@ func encodeQuestion(question DNSQuestion) (response []byte) {
 	response = append(response, byte(0))
 	response = binary.BigEndian.AppendUint16(response, question.Type)
 	response = binary.BigEndian.AppendUint16(response, question.Class)
+	return
+}
+
+type DNSAnswer struct {
+	Name  []string
+	Type  uint16
+	Class uint16
+	TTL   uint32
+	Data  []byte
+}
+
+func encodeAnswer(answer DNSAnswer) (response []byte) {
+	for _, name := range answer.Name {
+		length := len(name)
+		response = append(response, byte(length))
+		response = append(response, []byte(name)...)
+	}
+	response = append(response, byte(0))
+	response = binary.BigEndian.AppendUint16(response, answer.Type)
+	response = binary.BigEndian.AppendUint16(response, answer.Class)
+	response = binary.BigEndian.AppendUint32(response, answer.TTL)
+	response = binary.BigEndian.AppendUint32(response, answer.TTL)
+	response = append(response, answer.Data...)
 	return
 }
