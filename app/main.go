@@ -44,6 +44,11 @@ func main() {
 		responseHeader := receivedHeader
 		responseHeader.QueryResponseIndicator = true
 		responseHeader.AnswerRecordCount = 1
+		if receivedHeader.OperationCode == 0 {
+			responseHeader.ResponseCode = 0
+		} else {
+			responseHeader.ResponseCode = 4
+		}
 
 		receivedQuestion := decodeQuestion([]byte(receivedData[12:]))
 
