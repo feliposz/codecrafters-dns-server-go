@@ -43,26 +43,46 @@ func main() {
 		//response := []byte{}
 		responseHeader := receivedHeader
 		responseHeader.QueryResponseIndicator = true
-		responseHeader.AnswerRecordCount = 1
+		responseHeader.AnswerRecordCount = receivedHeader.QuestionCount
 		if receivedHeader.OperationCode == 0 {
 			responseHeader.ResponseCode = 0
 		} else {
 			responseHeader.ResponseCode = 4
 		}
+		encodedHeader := encodeDNSHeader(responseHeader)
 
-		receivedQuestion := decodeQuestion([]byte(receivedData[12:]))
+		offset := 12 // skipping header
 
-		answer := DNSAnswer{
-			Name:  receivedQuestion.Name,
-			Type:  receivedQuestion.Type,
-			Class: receivedQuestion.Class,
-			TTL:   60,
-			Data:  []byte{8, 8, 8, 8},
+		encodedQuestions := []byte{}
+		encodedAnswers := []byte{}
+
+		// log.Println("receivedHeader.QuestionCount", receivedHeader.QuestionCount)
+		for i := 0; i < int(receivedHeader.QuestionCount); i++ {
+			// log.Println("question #", i)
+			receivedQuestion, questionLength := decodeQuestion([]byte(receivedData), offset)
+			// log.Printf("%+v\n", receivedQuestion)
+
+			answer := DNSAnswer{
+				Name:  receivedQuestion.Name,
+				Type:  receivedQuestion.Type,
+				Class: receivedQuestion.Class,
+				TTL:   60,
+				Data:  []byte{8, 8, 8, 8},
+			}
+			// log.Printf("%+v\n", answer)
+
+			encodedQuestion := encodeQuestion(receivedQuestion)
+			encodedAnswer := encodeAnswer(answer)
+			encodedQuestions = append(encodedQuestions, encodedQuestion...)
+			encodedAnswers = append(encodedAnswers, encodedAnswer...)
+
+			offset += questionLength
 		}
 
-		response := encodeDNSHeader(responseHeader)
-		response = append(response, encodeQuestion(receivedQuestion)...)
-		response = append(response, encodeAnswer(answer)...)
+		response := []byte{}
+		response = append(response, encodedHeader...)
+		response = append(response, encodedQuestions...)
+		response = append(response, encodedAnswers...)
 
 		_, err = udpConn.WriteToUDP(response, source)
 		if err != nil {
@@ -161,19 +181,43 @@ type DNSQuestion struct {
 	Class uint16
 }
 
-func decodeQuestion(data []byte) (question DNSQuestion) {
-	i := 0
+func decodeQuestion(data []byte, offset int) (question DNSQuestion, size int) {
+	i := offset
 	for i < len(data) {
 		length := int(data[i])
 		i++
 		if length == 0 {
 			break
 		}
-		question.Name = append(question.Name, string(data[i:i+length]))
-		i += length
+		if length <= 63 {
+			question.Name = append(question.Name, string(data[i:i+length]))
+			i += length
+		} else {
+			// log.Println("Found pointer at ", i)
+			compressedOffset := int(binary.BigEndian.Uint16(data[i-1:]) & 0b0011111111111111)
+			j := compressedOffset
+			for j < len(data) {
+				length := int(data[j])
+				// log.Println("j=", j)
+				// log.Println("length=", length)
+				j++
+				if length == 0 {
+					break
+				}
+				temp := string(data[j : j+length])
+				// log.Println("temp=", temp)
+				question.Name = append(question.Name, temp)
+				j += length
+			}
+			i++
+			break
+		}
 	}
 	question.Type = binary.BigEndian.Uint16(data[i:])
-	question.Class = binary.BigEndian.Uint16(data[i+2:])
+	i += 2
+	question.Class = binary.BigEndian.Uint16(data[i:])
+	i += 2
+	size = i - offset
 	return
 }
 
@@ -207,7 +251,7 @@ func encodeAnswer(answer DNSAnswer) (response []byte) {
 	response = binary.BigEndian.AppendUint16(response, answer.Type)
 	response = binary.BigEndian.AppendUint16(response, answer.Class)
 	response = binary.BigEndian.AppendUint32(response, answer.TTL)
-	response = binary.BigEndian.AppendUint32(response, answer.TTL)
+	response = binary.BigEndian.AppendUint16(response, uint16(len(answer.Data)))
 	response = append(response, answer.Data...)
 	return
 }

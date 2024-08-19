@@ -53,6 +53,14 @@ func TestEncodeDecode(t *testing.T) {
 
 func TestDecodeQuestion(t *testing.T) {
 	data := []byte{0x06, 0x67, 0x6f, 0x6f, 0x67, 0x6c, 0x65, 0x03, 0x63, 0x6f, 0x6d, 0x00, 0x00, 0x01, 0x00, 0x01}
-	question := decodeQuestion(data)
+	question, _ := decodeQuestion(data, 0)
 	fmt.Printf("%+v\n", question)
+}
+
+func TestDecodePackedQuestion(t *testing.T) {
+	data := []byte("\x87\xfc\x01\x00\x00\x02\x00\x00\x00\x00\x00\x00\x03abc\x11longassdomainname\x03com\x00\x00\x01\x00\x01\x03def\xc0\x10\x00\x01\x00\x01")
+	question1, question1Length := decodeQuestion(data, 12)
+	fmt.Printf("%+v\n", question1)
+	question2, _ := decodeQuestion(data, 12+question1Length)
+	fmt.Printf("%+v\n", question2)
 }
