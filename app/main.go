@@ -1,16 +1,44 @@
 package main
 
 import (
+	"context"
 	"encoding/binary"
+	"flag"
 	"fmt"
+	"log"
 	"net"
+	"strings"
+	"time"
 )
 
 func main() {
+	var resolverAddr string
+	flag.StringVar(&resolverAddr, "resolver", "", "set resolver address")
+	flag.Parse()
+
+	if !flag.Parsed() {
+		flag.Usage()
+		return
+	}
+
 	udpAddr, err := net.ResolveUDPAddr("udp", "127.0.0.1:2053")
 	if err != nil {
 		fmt.Println("Failed to resolve UDP address:", err)
 		return
+	}
+
+	var fwdResolver *net.Resolver
+	if resolverAddr != "" {
+		fmt.Println("connecting to ", resolverAddr)
+		fwdResolver = &net.Resolver{
+			PreferGo: true,
+			Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+				dialer := &net.Dialer{
+					Timeout: time.Second * time.Duration(10),
+				}
+				return dialer.DialContext(ctx, network, address)
+			},
+		}
 	}
 
 	udpConn, err := net.ListenUDP("udp", udpAddr)
@@ -39,17 +67,13 @@ func main() {
 
 		receivedHeader := decodeDNSHeader([]byte(receivedData))
 
-		// Create an empty response
-		//response := []byte{}
 		responseHeader := receivedHeader
 		responseHeader.QueryResponseIndicator = true
-		responseHeader.AnswerRecordCount = receivedHeader.QuestionCount
 		if receivedHeader.OperationCode == 0 {
 			responseHeader.ResponseCode = 0
 		} else {
 			responseHeader.ResponseCode = 4
 		}
-		encodedHeader := encodeDNSHeader(responseHeader)
 
 		offset := 12 // skipping header
 
@@ -72,12 +96,31 @@ func main() {
 			// log.Printf("%+v\n", answer)
 
 			encodedQuestion := encodeQuestion(receivedQuestion)
-			encodedAnswer := encodeAnswer(answer)
 			encodedQuestions = append(encodedQuestions, encodedQuestion...)
-			encodedAnswers = append(encodedAnswers, encodedAnswer...)
+
+			if fwdResolver != nil {
+				host := strings.Join(receivedQuestion.Name, ".")
+
+				log.Println("forward request for", host)
+				ips, err := fwdResolver.LookupIP(context.Background(), "ip4", host)
+				if err == nil {
+					log.Println("Got", ips)
+					for _, ip := range ips {
+						answer.Data = ip.To4()
+						encodedAnswer := encodeAnswer(answer)
+						encodedAnswers = append(encodedAnswers, encodedAnswer...)
+						responseHeader.AnswerRecordCount++
+					}
+				} else {
+					log.Println(err)
+					continue
+				}
+			}
 
 			offset += questionLength
 		}
+
+		encodedHeader := encodeDNSHeader(responseHeader)
 
 		response := []byte{}
 		response = append(response, encodedHeader...)
