@@ -36,7 +36,7 @@ func main() {
 				dialer := &net.Dialer{
 					Timeout: time.Second * time.Duration(10),
 				}
-				return dialer.DialContext(ctx, network, address)
+				return dialer.DialContext(ctx, network, resolverAddr)
 			},
 		}
 	}
@@ -113,6 +113,10 @@ func main() {
 					}
 				} else {
 					log.Println(err)
+					answer.Data = []byte{8, 8, 8, 8}
+					encodedAnswer := encodeAnswer(answer)
+					encodedAnswers = append(encodedAnswers, encodedAnswer...)
+					responseHeader.AnswerRecordCount++
 					continue
 				}
 			}
